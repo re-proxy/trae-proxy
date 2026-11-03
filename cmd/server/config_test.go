@@ -87,3 +87,43 @@ func TestBadDuration(t *testing.T) {
 		t.Fatal("want error for bad duration")
 	}
 }
+
+// 服务器部署：回调地址可通过 env 或 json 覆盖，默认留空走 127.0.0.1:callback_port。
+func TestCallbackURL(t *testing.T) {
+	c, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CallbackURL != "" {
+		t.Errorf("default callback_url=%q want empty", c.CallbackURL)
+	}
+
+	t.Setenv("TW2A_CALLBACK_URL", "https://trae.example.com/authorize")
+	c, err = Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CallbackURL != "https://trae.example.com/authorize" {
+		t.Errorf("callback_url=%q", c.CallbackURL)
+	}
+}
+
+func TestCallbackURLFromFileAndInvalid(t *testing.T) {
+	dir := t.TempDir()
+	ok := filepath.Join(dir, "ok.json")
+	os.WriteFile(ok, []byte(`{"callback_url":"http://10.0.0.5:7864/authorize"}`), 0o600)
+	c, err := Load(ok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CallbackURL != "http://10.0.0.5:7864/authorize" {
+		t.Errorf("callback_url=%q", c.CallbackURL)
+	}
+
+	// 缺 scheme/host 的地址启动即报错，避免部署后登录才暴露
+	bad := filepath.Join(dir, "bad.json")
+	os.WriteFile(bad, []byte(`{"callback_url":"trae.example.com/authorize"}`), 0o600)
+	if _, err := Load(bad); err == nil {
+		t.Fatal("want error for callback_url without scheme")
+	}
+}

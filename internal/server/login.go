@@ -1,10 +1,12 @@
 // login.go Web 登录闭环：生成登录 URL → pending 态 → /authorize 回调捕获 →
 // ExchangeToken + GetUserInfo + 落盘 → 面板轮询 result。
 //
-// 回调端口策略（M0 结论：双端口 18080）：
-//   - TRAE 登录页回调到 http://127.0.0.1:18080/authorize
-//   - main.go 起第二个 http.Server 监听 18080，复用同一 Handler（/authorize 在主 mux 已注册）
-//   - 回调捕获后直接在服务端完成导入（用户无需再粘赖）
+// 回调地址策略：
+//   - login.sh 模式：TRAE 登录页回调到 127.0.0.1:18080/authorize，用户手工粘贴回调链接
+//   - main.go 起第二个 http.Server 监听 callback_port（默认 18080），复用同一 Handler（/authorize 在主 mux 已注册）
+//   - 公网部署：配置 callback_url（env TW2A_CALLBACK_URL）为完整可访问地址（如 https://trae.example.com/authorize），
+//     浏览器登录后回调直达服务，服务端直接完成导入
+//   - 回调捕获后直接在服务端完成导入（用户无需再粘贴）
 //
 // pending 态只在内存（重启丢失），符合「登录态瞬时」语义。
 package server
@@ -13,7 +15,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -53,16 +57,19 @@ type loginStartResponse struct {
 }
 
 // adminLoginStart POST /admin/api/login：生成登录 URL + pending 态。
-// body 可选 {callback_port: "18080"}；默认用 127.0.0.1:18080/authorize。
+// body 可选 {callback_url: "https://域名/authorize", callback_port: "18080"}。
+// 回调地址优先级：请求体 callback_url > 服务端 callback_url 配置 > 127.0.0.1:callback_port/authorize。
 func (h *Handler) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		CallbackURL  string `json:"callback_url,omitempty"`
 		CallbackPort string `json:"callback_port,omitempty"`
 	}
 	_ = decodeBodyOptional(r, &req)
-	if req.CallbackPort == "" {
-		req.CallbackPort = "18080"
+	callbackURL, err := h.resolveCallbackURL(req.CallbackURL, req.CallbackPort)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
 	}
-	callbackURL := "http://127.0.0.1:" + req.CallbackPort + "/authorize"
 
 	machineID, err := randomHex(16) // hex32
 	if err != nil {
@@ -97,6 +104,36 @@ func (h *Handler) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, loginStartResponse{
 		LoginURL: loginURL, PendingID: pendingID, CallbackURL: callbackURL,
 	})
+}
+
+// resolveCallbackURL 决定本次登录的 auth_callback_url。
+// 优先级：请求体 callback_url > 服务端 callback_url 配置 > 127.0.0.1:callback_port/authorize。
+// 显式给出的地址必须是完整 http(s) 地址（含 host），否则返回错误。
+func (h *Handler) resolveCallbackURL(reqURL, reqPort string) (string, error) {
+	if v := strings.TrimSpace(reqURL); v != "" {
+		if err := validateCallbackURL(v); err != nil {
+			return "", err
+		}
+		return v, nil
+	}
+	if v := strings.TrimSpace(h.cfg.CallbackURL); v != "" {
+		return v, nil
+	}
+	if reqPort == "" {
+		reqPort = "18080"
+	}
+	return "http://127.0.0.1:" + reqPort + "/authorize", nil
+}
+
+func validateCallbackURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("callback_url: %w", err)
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("callback_url 需要完整 http(s) 地址（含 host），得到 %q", raw)
+	}
+	return nil
 }
 
 // adminLoginResult GET /admin/api/login/result?pending_id=...

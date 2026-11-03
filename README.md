@@ -84,12 +84,34 @@ go build -o trae2api ./cmd/server
 ./trae2api
 ```
 
+### 服务器/公网部署的登录回调
+
+登录回调地址默认是 `http://127.0.0.1:18080/authorize`，只在**跑服务的那台机器的浏览器**里有效。部署到服务器后要改成一个浏览器能访问到的地址，否则登录回调打不开、账号无法自动落盘。
+
+```bash
+# .env（docker compose 会透传）
+TW2A_CALLBACK_URL=https://trae.example.com/authorize
+```
+
+或写进 `config.json`：
+
+```json
+{ "callback_url": "https://trae.example.com/authorize" }
+```
+
+要点：
+
+- 地址必须带 `http://` 或 `https://` 和域名，**路径建议用 `/authorize`**（该路由由服务自身处理）。
+- 反代场景把域名指到 `TW2A_LISTEN`（默认 `:7864`），Nginx/Caddy 加上 80/443 监听与证书即可；`18080` 端口只在纯本机模式下才需要。
+- 保存后重启服务生效；面板里发起登录时也可以在「回调地址」输入框单次覆盖，优先级：面板输入 > `TW2A_CALLBACK_URL` > `127.0.0.1:<callback_port>`。
+- 地址填错时浏览器会停在一个打不开的页面，此时把地址栏完整链接粘到面板的「导入凭证」或 `./login.sh` 仍然可以完成导入。
+
 ## Web 管理面板
 
 服务启动后，访问 `http://127.0.0.1:7864/admin` 即可进入可视化管理后台：
 
 - **账号总览**：实时查看各账号的剩余积分、配额总量、已用积分、权益包数及签到状态。
-- **Web 登录闭环**：在面板点击发起登录，浏览器完成验证后回调自动回传至服务并完成 Token 换取与热加载，无需手动复制凭证。
+- **Web 登录闭环**：在面板点击发起登录，浏览器完成验证后回调自动回传至服务并完成 Token 换取与热加载，无需手动复制凭证。回调地址可在面板输入框临时覆盖，也可用 `TW2A_CALLBACK_URL` 全局固定（服务器部署必配）。
 - **凭证管理**：支持粘贴 JSON 凭证或回调链接直接导入账号，支持随时启停软开关、修改备注昵称或删除失效账号。
 - **安全脱敏**：前端展示严格脱敏（仅显示前缀与长度），写操作（导入、删除、修改）均受 `TW2A_API_KEY` 保护。
 
@@ -143,6 +165,7 @@ curl -X POST http://127.0.0.1:7864/v1/chat/completions \
 | `TW2A_STATE_FILE` | `./data/state.json` | 账号池状态持久化文件 |
 | `TW2A_DEFAULT_MODEL` | `glm-5.2` | 默认回退请求模型 |
 | `TW2A_CALLBACK_PORT` | `18080` | 本地 OAuth 回调端口（设为 0 可关闭） |
+| `TW2A_CALLBACK_URL` | (空) | 登录回调落点完整地址；空则回落到 `http://127.0.0.1:<callback_port>/authorize`。服务器/公网部署必填，如 `https://trae.example.com/authorize` |
 | `TW2A_TIMEOUT_SECONDS` | `120` | 上游请求超时时长（秒） |
 | `TW2A_ERR_THRESHOLD` | `3` | 触发冷却前的连续错误次数 |
 | `TW2A_ERR_COOLDOWN` | `300` | 错误冷却时长（秒） |

@@ -6,6 +6,10 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - TW2A_API_KEY=${TW2A_API_KEY:?set TW2A_API_KEY in .env or shell}
+      # 登录回调地址：服务器部署必须改成浏览器可达的完整地址（如 https://trae.example.com/authorize），
+      # 留空 = http://127.0.0.1:18080/authorize（仅本机浏览器有效）
+      - TW2A_CALLBACK_URL=${TW2A_CALLBACK_URL:-}
+      - TW2A_CALLBACK_PORT=${TW2A_CALLBACK_PORT:-18080}
       # Work 通道运行模式：auto (智能自动模式，推荐) | native | bridge | disabled
       - TW2A_WORK_MODE=${TW2A_WORK_MODE:-auto}
       - TW2A_WORK_BRIDGE_URL=${TW2A_WORK_BRIDGE_URL:-http://host-gateway:7865}

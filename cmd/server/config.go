@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 type Config struct {
 	Listen          string `json:"listen"`            // ":7864"
 	CallbackPort    string `json:"callback_port"`     // "18080"（TRAE 登录回调监听端口，0 = 不起）
+	CallbackURL     string `json:"callback_url"`      // 登录回调落点（公网部署填完整地址，如 https://trae.example.com/authorize；空 = 127.0.0.1:callback_port）
 	APIKey          string `json:"-"`                 // 只读 env TW2A_API_KEY（不读 json）
 	AuthDir         string `json:"auth_dir"`          // "./auths"
 	StateFile       string `json:"state_file"`        // "./data/state.json"
@@ -51,6 +53,7 @@ func Default() *Config {
 	c := &Config{
 		Listen:          ":7864",
 		CallbackPort:    "18080",
+		CallbackURL:     "",
 		APIKey:          "",
 		AuthDir:         "./auths",
 		StateFile:       "./data/state.json",
@@ -102,6 +105,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("TW2A_CALLBACK_PORT"); v != "" {
 		c.CallbackPort = v
+	}
+	if v := os.Getenv("TW2A_CALLBACK_URL"); v != "" {
+		c.CallbackURL = v
 	}
 	if v := os.Getenv("TW2A_AUTH_DIR"); v != "" {
 		c.AuthDir = v
@@ -183,6 +189,17 @@ func (c *Config) normalize() error {
 	// CallbackPort：空/未设 → 默认 18080；显式 "0" → 不起回调 server（纯手动粘贴模式）
 	if c.CallbackPort == "" {
 		c.CallbackPort = "18080"
+	}
+	// CallbackURL：空 → 面板登录用 127.0.0.1:callback_port；填了必须是完整 http(s) 地址。
+	c.CallbackURL = strings.TrimSpace(c.CallbackURL)
+	if c.CallbackURL != "" {
+		u, perr := url.Parse(c.CallbackURL)
+		if perr != nil {
+			return fmt.Errorf("callback_url: %w", perr)
+		}
+		if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("callback_url: 需要完整 http(s) 地址（含 host），得到 %q", c.CallbackURL)
+		}
 	}
 	return nil
 }

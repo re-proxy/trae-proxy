@@ -4,15 +4,18 @@
 # 流程（不再依赖 scripts/login_local.py）：
 #   1. 生成 machine_id/device_id（openssl rand -hex 16，fallback python secrets），
 #      本对 id 同时用于登录 URL 与落盘 auth，保证前后一致
-#   2. 构造登录 URL（带 127.0.0.1 回调 + 新 machine/device id），打印给用户
-#   3. 用户在浏览器打开链接登录 → 浏览器跳到打不开的 127.0.0.1 地址
-#   4. 用户复制地址栏完整回调链接，粘贴到这里
+#   2. 构造登录 URL（带回调地址 + 新 machine/device id），打印给用户
+#   3. 用户在浏览器打开链接登录 → 浏览器跳回调地址
+#      默认 127.0.0.1:18080（本机跑服务时自动完成）；服务器部署时置 TW2A_CALLBACK_URL
+#      为公网域名（如 https://trae.example.com/authorize）
+#   4. 若回调地址不可达（浏览器显示打不开），复制地址栏完整链接粘贴到脚本
 #   5. 内嵌 python 解析回调（parse_qs + unquote）→ 提取 refreshToken / userInfo
 #   6. ExchangeToken → GetUserInfo → 落盘 auths/trae-{uid}.json
 #   7. 自动签到 + 查积分 → 重启容器加载新账号
 #
 # 用法:
 #   ./login.sh
+#   TW2A_CALLBACK_URL=https://trae.example.com/authorize ./login.sh
 set -euo pipefail
 
 # Windows 商店占位别名（AppInstallerPythonRedirector）非交互下 exit 49，回退到 python
@@ -26,6 +29,8 @@ CONTAINER="trae2api"
 CLIENT_ID="en1oxy7wnw8j9n"          # SOLO stable
 APP_VERSION="0.1.52"
 API_HOST="https://api.trae.com.cn"  # ExchangeToken / GetUserInfo host（auth.apiHost）
+# 登录回调落点：默认本机双端口；服务器部署用 TW2A_CALLBACK_URL 指向公网可访问地址
+CALLBACK_URL="${TW2A_CALLBACK_URL:-http://127.0.0.1:18080/authorize}"
 
 mkdir -p "$AUTH_DIR"
 
@@ -39,12 +44,12 @@ echo "============================================================"
 echo ""
 echo "步骤："
 echo "  1. 在浏览器打开下面链接，用手机号/验证码登录"
-echo "  2. 登录成功后浏览器会跳到打不开的 127.0.0.1 地址"
-echo "  3. 复制浏览器地址栏的完整链接，粘贴到下面"
+echo "  2. 登录成功后浏览器会跳转到回调地址：$CALLBACK_URL"
+echo "     该地址可直达服务时账号会自动添加；打不开则复制地址栏完整链接粘贴到下面"
 echo ""
 
 # ─── 构造登录链接（内嵌 python 保证 URL 编码正确）───
-LOGIN_URL="$(MACHINE_ID="$MACHINE_ID" DEVICE_ID="$DEVICE_ID" CLIENT_ID="$CLIENT_ID" APP_VERSION="$APP_VERSION" python3 - <<'PYEOF'
+LOGIN_URL="$(MACHINE_ID="$MACHINE_ID" DEVICE_ID="$DEVICE_ID" CLIENT_ID="$CLIENT_ID" APP_VERSION="$APP_VERSION" CALLBACK_URL="$CALLBACK_URL" python3 - <<'PYEOF'
 import os, secrets, urllib.parse
 
 params = {
@@ -56,7 +61,7 @@ params = {
     "client_id": os.environ["CLIENT_ID"],
     "redirect": "0",
     "login_trace_id": secrets.token_hex(8),   # hex16
-    "auth_callback_url": "http://127.0.0.1:18080/authorize",
+    "auth_callback_url": os.environ["CALLBACK_URL"],
     "machine_id": os.environ["MACHINE_ID"],
     "device_id": os.environ["DEVICE_ID"],
     "x_device_id": os.environ["DEVICE_ID"],

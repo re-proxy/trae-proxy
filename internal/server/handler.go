@@ -28,6 +28,7 @@ type Config struct {
 	WorkMode        upstream.WorkMode
 	APIKey          string        // 空 = 不鉴权
 	AuthDir         string        // auths/ 目录，用于 import/delete 落盘 trae-*.json
+	CallbackURL     string        // 登录回调落点（公网域名，如 https://trae.example.com/authorize；空 = 127.0.0.1:callback_port）
 	MaxRotate       int           // 单请求最多换号次数，默认 3
 	PlanCooldown    time.Duration // 1005 冷却，默认 12h
 	SoftCooldown    time.Duration // 429 冷却，默认 60s
